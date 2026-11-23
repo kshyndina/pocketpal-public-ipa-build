@@ -55,6 +55,11 @@ describe('DownloadManager', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // clearAllMocks retains mockResolvedValueOnce queues from previous cases.
+    // Give each download an isolated filesystem state.
+    (RNFS.exists as jest.Mock).mockReset().mockResolvedValue(false);
+    (RNFS.stat as jest.Mock).mockReset().mockResolvedValue({size: 1, isFile: () => true});
+    (RNFS.moveFile as jest.Mock).mockReset().mockResolvedValue(undefined);
 
     // Setup mock event emitter
     mockEventEmitter = {
@@ -306,7 +311,7 @@ describe('DownloadManager', () => {
       '/path/to/model.bin',
     );
 
-    await jest.runAllTimersAsync();
+    await new Promise(resolve => setImmediate(resolve));
 
     expect(RNFS.mkdir).toHaveBeenCalledWith('/path/to');
 
