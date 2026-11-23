@@ -1,0 +1,41 @@
+diff --git a/node_modules/@dr.pogodin/react-native-fs/ios/Downloader.mm b/node_modules/@dr.pogodin/react-native-fs/ios/Downloader.mm
+--- a/node_modules/@dr.pogodin/react-native-fs/ios/Downloader.mm
++++ b/node_modules/@dr.pogodin/react-native-fs/ios/Downloader.mm
+@@ -124,6 +124,14 @@
+   if([_statusCode integerValue] >= 200 && [_statusCode integerValue] < 300) {
+     [fm removeItemAtURL:destURL error:nil];       // Remove file at destination path, if it exists
+     [fm moveItemAtURL:location toURL:destURL error:&error];
++    if (error) {
++      // The URLSession task can succeed while publishing the file fails.
++      // Do not resolve a false HTTP 200: retain the Cocoa error domain/code.
++      NSLog(@"RNFS download: unable to move tempfile to destination. %@", error);
++      [session finishTasksAndInvalidate];
++      _params.errorCallback(error);
++      return;
++    }
+     // There are no guarantees about how often URLSession:downloadTask:didWriteData: will fire,
+     // so we read an authoritative number of bytes written here.
+     _bytesWritten = @([fm attributesOfItemAtPath:_params.toFile error:nil].fileSize);
+diff --git a/node_modules/@dr.pogodin/react-native-fs/ios/RNFSException.mm b/node_modules/@dr.pogodin/react-native-fs/ios/RNFSException.mm
+--- a/node_modules/@dr.pogodin/react-native-fs/ios/RNFSException.mm
++++ b/node_modules/@dr.pogodin/react-native-fs/ios/RNFSException.mm
+@@ -44,8 +44,18 @@
+ {
+   NSString *name = [NSString stringWithFormat:@"%@:%ld",
+                     error.domain, error.code];
++  // Keep machine-readable Cocoa/POSIX diagnostics across the RN bridge.
++  // Native descriptions and userInfo may contain paths/URLs; UI must not render them.
++  NSMutableDictionary *info = [NSMutableDictionary dictionaryWithDictionary:error.userInfo ?: @{}];
++  info[@"nativeDomain"] = error.domain;
++  info[@"nativeCode"] = @(error.code);
++  NSError *underlying = error.userInfo[NSUnderlyingErrorKey];
++  if ([underlying isKindOfClass:[NSError class]]) {
++    info[@"underlyingDomain"] = underlying.domain;
++    info[@"underlyingCode"] = @(underlying.code);
++  }
+   return [[RNFSException alloc]
+           initWithName:name
+           reason:error.localizedDescription
+-          userInfo:error.userInfo];
++          userInfo:info];
+ }
