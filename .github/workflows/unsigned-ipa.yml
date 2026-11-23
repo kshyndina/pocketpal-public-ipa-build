@@ -1,0 +1,150 @@
+name: Build unsigned PocketPal IPA
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-ios:
+    runs-on: macos-26
+    timeout-minutes: 180
+    env:
+      NODE_OPTIONS: '--max-old-space-size=8192'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.21.0'
+          cache: yarn
+      - name: Set up Ruby and CocoaPods
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2.3'
+          bundler-cache: true
+      - name: Install Yarn and dependencies
+        run: |
+          npm install -g yarn@1.22.22
+          yarn install --frozen-lockfile
+      - name: Run focused model, download, import and voice Jest tests
+        run: |
+          yarn jest --runInBand --watch=false \
+            src/services/downloads/__tests__/DownloadManager.test.ts \
+            src/services/downloads/__tests__/iosDownloadError.test.ts \
+            src/store/__tests__/ModelStore.localModelPath.test.ts \
+            src/store/__tests__/ModelStore.pathGuard.test.ts \
+            src/store/onboarding/__tests__/onboardingPals.test.ts \
+            src/services/tts/engines/blue/__tests__/BlueEngine.test.ts \
+            src/utils/__tests__/errors.test.ts \
+            src/components/DownloadErrorDialog/__tests__/DownloadErrorDialog.test.tsx
+      - name: Restore enriched-markdown native assets
+        run: INIT_CWD="$GITHUB_WORKSPACE" node node_modules/react-native-enriched-markdown/postinstall.mjs
+      - name: Create Env.xcconfig
+        run: |
+          cat > ios/Config/Env.xcconfig << 'EOL'
+          // This file contains environment-specific build settings.
+
+          GOOGLE_WEB_CLIENT_ID = dummy-web-client-id.apps.googleusercontent.com
+          REVERSED_GOOGLE_IOS_CLIENT_ID = com.googleusercontent.apps.dummy-ios-client-id
+
+          EOL
+
+      - name: Create dummy .env file for CI
+        run: |
+          cat > .env << 'EOL'
+          FIREBASE_FUNCTIONS_URL=https://dummy-firebase-url.com
+
+          # PalsHub/Supabase Configuration
+          SUPABASE_URL=https://dummy-supabase-url.supabase.co
+          SUPABASE_ANON_KEY=dummy-anon-key-for-ci-builds
+          PALSHUB_API_BASE_URL=https://dummy-palshub-api.com
+
+          # App Configuration
+          APP_URL=pocketpal://app
+
+          # Feature Flags (true/false)
+          ENABLE_PALSHUB_INTEGRATION=true
+          ENABLE_AUTHENTICATION=true
+          ENABLE_OFFLINE_MODE=true
+
+          # Google Sign-In Configuration
+          GOOGLE_IOS_CLIENT_ID=dummy-ios-client-id.apps.googleusercontent.com
+          GOOGLE_WEB_CLIENT_ID=dummy-web-client-id.apps.googleusercontent.com
+          EOL
+
+      - name: Create dummy GoogleService-Info.plist for CI
+        run: |
+          cat > ios/GoogleService-Info.plist << 'EOL'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CLIENT_ID</key>
+            <string>dummy-client-id.apps.googleusercontent.com</string>
+            <key>REVERSED_CLIENT_ID</key>
+            <string>com.googleusercontent.apps.dummy-client-id</string>
+            <key>API_KEY</key>
+            <string>dummy-api-key-for-ci-builds</string>
+            <key>GCM_SENDER_ID</key>
+            <string>000000000000</string>
+            <key>PLIST_VERSION</key>
+            <string>1</string>
+            <key>BUNDLE_ID</key>
+            <string>ai.pocketpal</string>
+            <key>PROJECT_ID</key>
+            <string>dummy-project-for-ci</string>
+            <key>STORAGE_BUCKET</key>
+            <string>dummy-project-for-ci.appspot.com</string>
+            <key>IS_ADS_ENABLED</key>
+            <false/>
+            <key>IS_ANALYTICS_ENABLED</key>
+            <false/>
+            <key>IS_APPINVITE_ENABLED</key>
+            <false/>
+            <key>IS_GCM_ENABLED</key>
+            <true/>
+            <key>IS_SIGNIN_ENABLED</key>
+            <true/>
+            <key>GOOGLE_APP_ID</key>
+            <string>1:000000000000:ios:0000000000000000</string>
+          </dict>
+          </plist>
+          EOL
+      - name: Install CocoaPods
+        run: cd ios && bundle exec pod install
+      - name: Select Xcode and ensure Metal toolchain
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+          xcrun -sdk iphoneos metal -v || xcodebuild -downloadComponent MetalToolchain
+      - name: Build unsigned device app
+        run: |
+          set -o pipefail
+          cd ios
+          xcodebuild -workspace PocketPal.xcworkspace -scheme PocketPal -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=NO 2>&1 | tee ../ios-build.log
+      - name: Verify iOS payload
+        run: scripts/verify-ios-payload.sh ios/build/Build/Products/Release-iphoneos/PocketPal.app --require-marker
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          app=ios/build/Build/Products/Release-iphoneos/PocketPal.app
+          test -f "$app/Info.plist"
+          test -f "$app/PocketPal"
+          mkdir -p dist/Payload
+          ditto "$app" dist/Payload/PocketPal.app
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent Payload PocketPal-unsigned.ipa
+          unzip -t PocketPal-unsigned.ipa | tail -1
+          ls -lh PocketPal-unsigned.ipa
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketPal-unsigned-ipa
+          path: dist/PocketPal-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: ios-build.log
+          if-no-files-found: ignore
