@@ -26,7 +26,8 @@ jobs:
           yarn install --frozen-lockfile
       - name: Run focused model, download, import and voice Jest tests
         run: |
-          yarn jest --runInBand --watch=false \
+          yarn jest --coverage=false --runInBand --watch=false \
+            src/utils/__tests__/importGGUF.test.ts \
             src/services/downloads/__tests__/DownloadManager.test.ts \
             src/services/downloads/__tests__/iosDownloadError.test.ts \
             src/store/__tests__/ModelStore.localModelPath.test.ts \
