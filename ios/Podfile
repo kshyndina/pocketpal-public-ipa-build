@@ -176,6 +176,10 @@ target 'PocketPal' do
   # (please file an issue if this causes issues for you)
   # pod 'React-jsi', path: '../node_modules/react-native/ReactCommon/jsi', modular_headers: true
   
+  # ONNX upstream CDN currently has a TLS hostname mismatch. Use the exact
+  # 1.24.3 archive mirrored by PocketPal upstream, with a pinned SHA-256.
+  pod 'onnxruntime-c', :podspec => './onnxruntime-c.podspec.json'
+
   # WatermelonDB dependency
   pod 'simdjson', path: '../node_modules/@nozbe/simdjson', modular_headers: true
 
