@@ -170,7 +170,7 @@ describe('DownloadManager', () => {
     expect(RNFS.downloadFile).toHaveBeenCalledWith(
       expect.objectContaining({
         fromUrl: basicModel.downloadUrl,
-        toFile: '/path/to/model.bin',
+        toFile: '/path/to/model.bin.download',
       }),
     );
 
@@ -284,9 +284,12 @@ describe('DownloadManager', () => {
     let beginCallback: any;
     let progressCallback: any;
 
+    let completeDownload: (result: {statusCode: number; bytesWritten: number}) => void = () => {};
     const mockDownloadResult = {
       jobId: 456,
-      promise: Promise.resolve({statusCode: 200}),
+      promise: new Promise<{statusCode: number; bytesWritten: number}>(resolve => {
+        completeDownload = resolve;
+      }),
     };
 
     (RNFS.downloadFile as jest.Mock).mockImplementation(options => {
@@ -352,7 +355,8 @@ describe('DownloadManager', () => {
       }),
     );
 
-    // Wait for the download promise to resolve
+    // Complete only after begin/progress callbacks have been asserted.
+    completeDownload({statusCode: 200, bytesWritten: 1000000});
     await downloadPromise;
 
     expect(RNFS.moveFile).toHaveBeenCalledWith('/path/to/model.bin.download', '/path/to/model.bin');
@@ -539,7 +543,7 @@ describe('DownloadManager', () => {
 
     await expect(
       iosDownloadManager.startDownload(basicModel, '/path/to/model.bin'),
-    ).rejects.toThrow('Network connection lost');
+    ).rejects.toThrow('iOS temporary download failed');
 
     expect(callbacks.onError).toHaveBeenCalledWith(
       'model-1',
@@ -591,7 +595,7 @@ describe('DownloadManager', () => {
 
     await expect(
       iosDownloadManager.startDownload(basicModel, '/path/to/model.bin'),
-    ).rejects.toThrow('Network connection lost');
+    ).rejects.toThrow('iOS temporary download failed');
 
     expect(callbacks.onError).toHaveBeenCalledWith(
       'model-1',
